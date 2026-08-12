@@ -1738,6 +1738,38 @@
                                 </div>
                             </div>
 
+                            <div v-if="monitor.type === 'real-browser'" class="my-3 form-check">
+                                <input
+                                    id="browser-persist-session"
+                                    v-model="monitor.browserPersistSession"
+                                    class="form-check-input"
+                                    type="checkbox"
+                                />
+                                <label class="form-check-label" for="browser-persist-session">
+                                    {{ $t("Persistent Browser Session") }}
+                                </label>
+                                <div class="form-text">
+                                    {{ $t("persistentBrowserSessionDescription") }}
+                                </div>
+                            </div>
+
+                            <div v-if="monitor.type === 'real-browser' && monitor.browserPersistSession" class="my-3">
+                                <label for="browser-ready-selector" class="form-label">
+                                    {{ $t("Ready Selector") }}
+                                </label>
+                                <input
+                                    id="browser-ready-selector"
+                                    v-model="monitor.browserReadySelector"
+                                    class="form-control"
+                                    type="text"
+                                    maxlength="1024"
+                                    placeholder="#app-ready"
+                                />
+                                <div class="form-text">
+                                    {{ $t("readySelectorDescription") }}
+                                </div>
+                            </div>
+
                             <div v-if="showDomainExpiryNotification" class="my-3 form-check">
                                 <input
                                     id="domain-expiry-notification"
@@ -3314,6 +3346,8 @@ const monitorDefaults = {
     gamedigToken: "",
     remote_browser: null,
     screenshot_delay: 0,
+    browserPersistSession: false,
+    browserReadySelector: null,
     rabbitmqNodes: [],
     rabbitmqUsername: "",
     rabbitmqPassword: "",

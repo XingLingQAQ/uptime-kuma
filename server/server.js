@@ -939,6 +939,11 @@ let needSetup = false;
                 bean.gamedigToken = monitor.gamedigToken;
                 bean.remote_browser = monitor.remote_browser;
                 bean.screenshot_delay = monitor.screenshot_delay;
+                bean.browser_persist_session = Boolean(monitor.browserPersistSession);
+                bean.browser_ready_selector =
+                    typeof monitor.browserReadySelector === "string"
+                        ? monitor.browserReadySelector.trim() || null
+                        : null;
                 bean.smtpSecurity = monitor.smtpSecurity;
                 bean.snmpVersion = monitor.snmpVersion;
                 bean.snmpOid = monitor.snmpOid;

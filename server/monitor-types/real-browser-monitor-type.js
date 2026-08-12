@@ -9,6 +9,7 @@ const jwt = require("jsonwebtoken");
 const config = require("../config");
 const { RemoteBrowser } = require("../remote-browser");
 const { commandExists } = require("../util-server");
+const { loadBrowserSessionState, saveBrowserSessionState } = require("./real-browser-session-state");
 
 /**
  * Cached instance of a browser
@@ -243,6 +244,39 @@ async function testRemoteBrowser(remoteBrowserURL) {
         throw new Error(e.message);
     }
 }
+/**
+ * Create a browser context, optionally restoring a monitor's isolated state.
+ * @param {import("playwright-core").Browser} browser Playwright browser
+ * @param {object} monitor Monitor model
+ * @returns {Promise<import("playwright-core").BrowserContext>} Browser context
+ */
+async function createRealBrowserContext(browser, monitor) {
+    if (!monitor.getBrowserPersistSession()) {
+        return await browser.newContext();
+    }
+
+    const statePath = await loadBrowserSessionState(monitor.id);
+    return await browser.newContext(statePath ? { storageState: statePath } : {});
+}
+
+/**
+ * Wait for a configured public readiness selector before marking a check up.
+ * @param {import("playwright-core").Page} page Playwright page
+ * @param {object} monitor Monitor model
+ * @param {number} timeout Browser operation timeout in milliseconds
+ * @returns {Promise<void>}
+ */
+async function assertRealBrowserReady(page, monitor, timeout) {
+    const selector = monitor.getBrowserReadySelector();
+
+    if (selector) {
+        await page.waitForSelector(selector, {
+            state: "visible",
+            timeout,
+        });
+    }
+}
+
 class RealBrowserMonitorType extends MonitorType {
     name = "real-browser";
 
@@ -253,43 +287,53 @@ class RealBrowserMonitorType extends MonitorType {
         const browser = monitor.remote_browser
             ? await getRemoteBrowser(monitor.remote_browser, monitor.user_id)
             : await getBrowser();
-        const context = await browser.newContext();
-        const page = await context.newPage();
+        const timeout = monitor.interval * 1000 * 0.8;
+        const context = await createRealBrowserContext(browser, monitor);
 
-        // Prevent Local File Inclusion
-        // Accept only http:// and https://
-        // https://github.com/louislam/uptime-kuma/security/advisories/GHSA-2qgm-m29m-cj2h
-        let url = new URL(monitor.url);
-        if (url.protocol !== "http:" && url.protocol !== "https:") {
-            throw new Error("Invalid url protocol, only http and https are allowed.");
-        }
+        try {
+            const page = await context.newPage();
 
-        const res = await page.goto(monitor.url, {
-            waitUntil: "networkidle",
-            timeout: monitor.interval * 1000 * 0.8,
-        });
+            // Prevent Local File Inclusion
+            // Accept only http:// and https://
+            // https://github.com/louislam/uptime-kuma/security/advisories/GHSA-2qgm-m29m-cj2h
+            let url = new URL(monitor.url);
+            if (url.protocol !== "http:" && url.protocol !== "https:") {
+                throw new Error("Invalid url protocol, only http and https are allowed.");
+            }
 
-        // Wait for additional time before taking screenshot if configured
-        if (monitor.screenshot_delay > 0) {
-            await page.waitForTimeout(monitor.screenshot_delay);
-        }
+            const res = await page.goto(monitor.url, {
+                waitUntil: "networkidle",
+                timeout,
+            });
 
-        let filename = jwt.sign(monitor.id, server.jwtSecret) + ".png";
+            await assertRealBrowserReady(page, monitor, timeout);
 
-        await page.screenshot({
-            path: path.join(Database.screenshotDir, filename),
-        });
+            // Wait for additional time before taking screenshot if configured
+            if (monitor.screenshot_delay > 0) {
+                await page.waitForTimeout(monitor.screenshot_delay);
+            }
 
-        await context.close();
+            let filename = jwt.sign(monitor.id, server.jwtSecret) + ".png";
 
-        if (res.status() >= 200 && res.status() < 400) {
-            heartbeat.status = UP;
-            heartbeat.msg = res.status();
+            await page.screenshot({
+                path: path.join(Database.screenshotDir, filename),
+            });
 
-            const timing = res.request().timing();
-            heartbeat.ping = timing.responseEnd;
-        } else {
-            throw new Error(res.status() + "");
+            if (res.status() >= 200 && res.status() < 400) {
+                heartbeat.status = UP;
+                heartbeat.msg = res.status();
+
+                const timing = res.request().timing();
+                heartbeat.ping = timing.responseEnd;
+
+                if (monitor.getBrowserPersistSession()) {
+                    await saveBrowserSessionState(context, monitor.id);
+                }
+            } else {
+                throw new Error(res.status() + "");
+            }
+        } finally {
+            await context.close();
         }
     }
 }
@@ -299,4 +343,6 @@ module.exports = {
     testChrome,
     resetChrome,
     testRemoteBrowser,
+    createRealBrowserContext,
+    assertRealBrowserReady,
 };

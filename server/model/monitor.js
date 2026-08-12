@@ -54,6 +54,7 @@ const { DockerHost } = require("../docker");
 const jwt = require("jsonwebtoken");
 const crypto = require("crypto");
 const { UptimeCalculator } = require("../uptime-calculator");
+const { removeBrowserSessionState } = require("../monitor-types/real-browser-session-state");
 const { CookieJar } = require("tough-cookie");
 const { HttpsCookieAgent } = require("http-cookie-agent/http");
 const https = require("https");
@@ -195,6 +196,8 @@ class Monitor extends BeanModel {
             cacheBust: this.getCacheBust(),
             remote_browser: this.remote_browser,
             screenshot_delay: this.screenshot_delay,
+            browserPersistSession: this.getBrowserPersistSession(),
+            browserReadySelector: this.getBrowserReadySelector(),
             snmpOid: this.snmpOid,
             jsonPathOperator: this.jsonPathOperator,
             snmpVersion: this.snmpVersion,
@@ -356,6 +359,26 @@ class Monitor extends BeanModel {
      */
     getCacheBust() {
         return Boolean(this.cacheBust);
+    }
+
+    /**
+     * Parse the real-browser persistent session setting to boolean.
+     * @returns {boolean} Whether to restore and save browser session state
+     */
+    getBrowserPersistSession() {
+        return Boolean(this.browser_persist_session);
+    }
+
+    /**
+     * Get a normalized optional selector that indicates public page readiness.
+     * @returns {string|null} Ready selector or null
+     */
+    getBrowserReadySelector() {
+        if (typeof this.browser_ready_selector !== "string") {
+            return null;
+        }
+
+        return this.browser_ready_selector.trim() || null;
     }
 
     /**
@@ -1767,6 +1790,11 @@ class Monitor extends BeanModel {
                     throw new Error(`Screenshot delay must be less than ${maxDelayFromInterval}ms (0.5 × interval)`);
                 }
             }
+
+            const readySelector = this.getBrowserReadySelector();
+            if (readySelector && readySelector.length > 1024) {
+                throw new Error("Ready selector must not exceed 1024 characters");
+            }
         }
 
         if (this.type === "mongodb" && this.databaseQuery) {
@@ -1992,6 +2020,12 @@ class Monitor extends BeanModel {
         if (monitorID in server.monitorList) {
             await server.monitorList[monitorID].stop();
             delete server.monitorList[monitorID];
+        }
+
+        try {
+            await removeBrowserSessionState(monitorID);
+        } catch (error) {
+            log.warn("monitor", `Could not remove browser session state for monitor ${monitorID}: ${error.message}`);
         }
 
         // Delete from database
